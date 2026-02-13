@@ -14,6 +14,16 @@ window.SANARE_DATA = {
     { year: 2028, marketing: 0.40, payroll: 0.40, rent: 0.20 }
   ],
   breakEven: { base: "Agosto 2026", minus20: "Noviembre 2026" },
+  sitesDefaults: {
+    siteCount: 3,
+    capexPerSite: 6000000,
+    wcPerSite: 1500000,
+    salesPerSiteM: 2500000,
+    grossMargin: 0.38,
+    opexPerSiteM: 1200000,
+    corpOpexM: 500000,
+    daPct: 0.03
+  },
   checklist: {
     market: [
       "¿Cuál es el TAM/SAM/SOM por ciudad y por servicio?",

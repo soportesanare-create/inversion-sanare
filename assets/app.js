@@ -1,10 +1,28 @@
-const SANARE_DASH_VERSION = 'v9'; console.log('Sanare dashboard', SANARE_DASH_VERSION);
+const SANARE_DASH_VERSION = 'v12'; console.log('Sanare dashboard', SANARE_DASH_VERSION);
 (() => {
   const D = window.SANARE_DATA;
-  const fmtMXN = (n) => new Intl.NumberFormat("es-MX",{style:"currency",currency:"MXN",maximumFractionDigits:0}).format(n);
-  const fmtPct = (p) => new Intl.NumberFormat("es-MX",{style:"percent",maximumFractionDigits:1}).format(p);
-  const fmtNum = (n) => new Intl.NumberFormat("es-MX",{maximumFractionDigits:0}).format(n);
+  const fmtMoney = (n) => new Intl.NumberFormat("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}).format(n);
+  const fmtMXN = (n) => (n===null || !isFinite(n)) ? "—" : ("$" + fmtMoney(n));
+  const fmtPct = (p) => new Intl.NumberFormat("en-US",{style:"percent",maximumFractionDigits:1}).format(p);
+  const fmtNum = (n) => new Intl.NumberFormat("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}).format(n);
+  const parseNum = (v, fallback=0) => {
+    if(v===null || v===undefined) return fallback;
+    if(typeof v === "number") return isFinite(v) ? v : fallback;
+    const s = String(v).trim().replace(/\$/g,"").replace(/\s+/g,"").replace(/,/g,"");
+    const x = parseFloat(s);
+    return isFinite(x) ? x : fallback;
+  };
   const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+
+  // ---------- sedes: presets "escenario ideal" por # de sedes ----------
+  // Puedes ajustar estos supuestos para que reflejen tu realidad (capex, ventas por sede, opex, etc.).
+  const SITE_PRESETS = [
+    { min: 1, max: 2, capex: 6500000, wc: 1800000, salesPerSiteM: 2200000, gm: 0.36, opexPerSiteM: 1150000, corpOpexM: 650000, daPct: 0.035, growth: 0.10, years: 5 },
+    { min: 3, max: 4, capex: 6000000, wc: 1500000, salesPerSiteM: 2500000, gm: 0.38, opexPerSiteM: 1200000, corpOpexM: 500000, daPct: 0.030, growth: 0.10, years: 5 },
+    { min: 5, max: 6, capex: 5800000, wc: 1500000, salesPerSiteM: 2750000, gm: 0.40, opexPerSiteM: 1250000, corpOpexM: 550000, daPct: 0.030, growth: 0.10, years: 6 },
+    { min: 7, max: 10, capex: 5600000, wc: 1500000, salesPerSiteM: 3000000, gm: 0.40, opexPerSiteM: 1300000, corpOpexM: 600000, daPct: 0.030, growth: 0.10, years: 6 },
+  ];
+  const pickSitePreset = (n) => SITE_PRESETS.find(p => n>=p.min && n<=p.max) || SITE_PRESETS[SITE_PRESETS.length-1];
   const MONTHS_ES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 
   // Scenario model (simple): scale sales, keep COGS proportional via base gross margin,
@@ -683,7 +701,22 @@ const SANARE_DASH_VERSION = 'v9'; console.log('Sanare dashboard', SANARE_DASH_VE
     );
   }
 
-  // ---------- inversión UI ----------
+  
+  // ---------- formato de inputs (12,000,000.00) ----------
+  function attachMoneyFormatters(){
+    const inputs = Array.from(document.querySelectorAll('input[data-money="1"]'));
+    inputs.forEach(inp => {
+      const fmt = () => {
+        const raw = (inp.value||"").trim();
+        if(!raw) return;
+        const n = parseNum(raw, 0);
+        inp.value = fmtMoney(n);
+      };
+      inp.addEventListener("blur", fmt);
+      fmt();
+    });
+  }
+// ---------- inversión UI ----------
   function renderInvestmentCalc(rows){
     const invEl = document.getElementById("invAmount");
     const fcfEl = document.getElementById("fcfConv");
@@ -692,7 +725,7 @@ const SANARE_DASH_VERSION = 'v9'; console.log('Sanare dashboard', SANARE_DASH_VE
     const extraEl = document.getElementById("extraYears");
     if(!invEl || !fcfEl || !discEl || !gEl || !extraEl) return; // si no existe en el DOM
 
-    const investment = Math.max(0, parseFloat(invEl.value || "0"));
+    const investment = Math.max(0, parseNum(invEl.value, 0));
     const fcfConv = parseFloat(fcfEl.value);
     const discRate = parseFloat(discEl.value);
     const gAfter = parseFloat(gEl.value);
@@ -742,6 +775,186 @@ const SANARE_DASH_VERSION = 'v9'; console.log('Sanare dashboard', SANARE_DASH_VE
       { aria:"Flujo acumulado", yTick:(v)=> (v/1e6).toFixed(0)+"M" }
     );
   }
+  // ---------- sedes UI ----------
+  function renderSitesCalc(){
+    const scEl = document.getElementById("siteCount");
+    const capEl = document.getElementById("capexPerSite");
+    const wcEl  = document.getElementById("wcPerSite");
+    const sEl   = document.getElementById("salesPerSiteM");
+    const gmEl  = document.getElementById("gmSite");
+    const oEl   = document.getElementById("opexPerSiteM");
+    const cEl   = document.getElementById("corpOpexM");
+    const daEl  = document.getElementById("daPctSite");
+    if(!scEl || !capEl || !wcEl || !sEl || !gmEl || !oEl || !cEl || !daEl) return;
+
+    // Auto-llenado de escenario ideal según # de sedes
+    const autoEl = document.getElementById("sitesAuto");
+    const autoOn = autoEl ? !!autoEl.checked : false;
+    // Persistimos el último # de sedes aplicado para no sobreescribir mientras editas
+    window.__SANARE_SITES_LAST_APPLIED = window.__SANARE_SITES_LAST_APPLIED ?? null;
+
+    const nRaw = Math.max(1, parseInt(scEl.value || "1", 10));
+    if(autoOn && window.__SANARE_SITES_LAST_APPLIED !== nRaw){
+      const p = pickSitePreset(nRaw);
+      capEl.value = fmtMoney(p.capex);
+      wcEl.value  = fmtMoney(p.wc);
+      sEl.value   = fmtMoney(p.salesPerSiteM);
+      gmEl.value  = String(p.gm);
+      oEl.value   = fmtMoney(p.opexPerSiteM);
+      cEl.value   = fmtMoney(p.corpOpexM);
+      daEl.value  = String(p.daPct);
+
+      const gEl2a = document.getElementById("sitesGrowth");
+      const yearsEl2a = document.getElementById("sitesYears");
+      if(gEl2a) gEl2a.value = String(p.growth);
+      if(yearsEl2a) yearsEl2a.value = String(p.years);
+
+      // formatea inputs monetarios recién seteados
+      attachMoneyFormatters();
+      window.__SANARE_SITES_LAST_APPLIED = nRaw;
+    }
+
+    const n = nRaw;
+    const capex = Math.max(0, parseNum(capEl.value, 0));
+    const wc = Math.max(0, parseNum(wcEl.value, 0));
+    const salesPerSiteM = Math.max(0, parseNum(sEl.value, 0));
+    const gm = Math.min(0.95, Math.max(0.01, parseFloat(gmEl.value || "0.35")));
+    const opexPerSiteM = Math.max(0, parseNum(oEl.value, 0));
+    const corpOpexM = Math.max(0, parseNum(cEl.value, 0));
+    const daPct = Math.min(0.20, Math.max(0.0, parseFloat(daEl.value || "0.0")));
+
+    const gEl2 = document.getElementById("sitesGrowth");
+    const yearsEl2 = document.getElementById("sitesYears");
+    const growth = gEl2 ? clamp(parseFloat(gEl2.value || "0.10"), 0, 0.30) : 0.10;
+    const yearsToProject = yearsEl2 ? Math.max(3, parseInt(yearsEl2.value || "5", 10)) : 5;
+    const gVal2 = document.getElementById("sitesGrowthVal");
+    if(gVal2) gVal2.textContent = Math.round(growth*100) + "%";
+
+
+    const gmVal = document.getElementById("gmSiteVal");
+    if(gmVal) gmVal.textContent = Math.round(gm*100) + "%";
+    const daVal = document.getElementById("daPctSiteVal");
+    if(daVal) daVal.textContent = (daPct*100).toFixed(1) + "%";
+
+    const investment = n * (capex + wc);
+
+    const salesM = n * salesPerSiteM;
+    const salesY = salesM * 12;
+
+    const grossProfitM = salesM * gm;
+    const opexM = n * opexPerSiteM + corpOpexM;
+
+    const ebitdaM = grossProfitM - opexM;
+    const ebitdaY = ebitdaM * 12;
+
+    const daM = (salesY * daPct) / 12; // D&A mensual aprox
+    const ebitM = ebitdaM - daM;
+
+    const fcfEl = document.getElementById("fcfConv");
+    const fcfConv = fcfEl ? parseFloat(fcfEl.value || "0.7") : 0.7;
+    const fcfM = ebitM * fcfConv;
+    const fcfY = fcfM * 12;
+
+    // break-even por sede (EBITDA≈0)
+    const reqSalesTotalM = (gm > 0) ? (opexM / gm) : Infinity;
+    const reqSalesPerSiteM = reqSalesTotalM / n;
+
+    // payback (simulación mensual con crecimiento)
+    const pbEl = document.getElementById("sitesPayback");
+    const pbMetaEl = document.getElementById("sitesPaybackMeta");
+    const toMonthYear = (mm)=>{
+      const m0 = Math.max(0, Math.ceil(mm)-1);
+      const year = 2026 + Math.floor(m0/12);
+      const month = m0 % 12;
+      return {year, month};
+    };
+
+    let paybackMonth = null;
+    let acc = -investment;
+    const monthsSim = yearsToProject * 12;
+    const fcfMonthlySeries = [];
+    for(let m=0; m<monthsSim; m++){
+      const yi = Math.floor(m/12);
+      const salesPerSiteM_m = salesPerSiteM * Math.pow(1+growth, yi);
+      const salesM_m = n * salesPerSiteM_m;
+      const grossProfitM_m = salesM_m * gm;
+      const opexM_m = n * opexPerSiteM + corpOpexM;
+      const ebitdaM_m = grossProfitM_m - opexM_m;
+      const daM_m = salesM_m * daPct;
+      const ebitM_m = ebitdaM_m - daM_m;
+      const fcfM_m = ebitM_m * fcfConv;
+      fcfMonthlySeries.push(fcfM_m);
+      acc += fcfM_m;
+      if(paybackMonth === null && acc >= 0) paybackMonth = m+1;
+    }
+
+    if(paybackMonth === null){
+      if(pbEl) pbEl.textContent = "No recupera";
+      if(pbMetaEl) pbMetaEl.textContent = "En el horizonte simulado";
+    } else {
+      const d = toMonthYear(paybackMonth);
+      if(pbEl) pbEl.textContent = `${MONTHS_ES[d.month]} ${d.year}`;
+      if(pbMetaEl) pbMetaEl.textContent = `${paybackMonth} meses (${(paybackMonth/12).toFixed(1)} años)`;
+    }
+
+    // Proyección anual
+    const projBody = document.getElementById("sitesProjBody");
+    if(projBody) projBody.innerHTML = "";
+    const years = [];
+    const accArr = [];
+    let accY = -investment;
+    for(let i=0; i<yearsToProject; i++){
+      const year = 2026 + i;
+      const salesPerSiteM_y = salesPerSiteM * Math.pow(1+growth, i);
+      const salesY = n * salesPerSiteM_y * 12;
+      const grossProfitY = salesY * gm;
+      const opexY = (n * opexPerSiteM + corpOpexM) * 12;
+      const ebitdaY = grossProfitY - opexY;
+      const daY = salesY * daPct;
+      const ebitY = ebitdaY - daY;
+      const fcfY = ebitY * fcfConv;
+      accY += fcfY;
+      years.push(String(year));
+      accArr.push(accY);
+
+      if(projBody){
+        const tr = document.createElement("tr");
+        const td = (txt, cls)=>{ const x=document.createElement("td"); x.textContent=txt; if(cls) x.className=cls; return x; };
+        tr.appendChild(td(String(year), ""));
+        tr.appendChild(td(fmtMXN(salesY), "num"));
+        tr.appendChild(td(fmtMXN(ebitdaY), "num"));
+        tr.appendChild(td(fmtMXN(fcfY), "num"));
+        tr.appendChild(td(fmtMXN(accY), "num"));
+        if(accY >= 0) tr.style.background = "rgba(16,185,129,.08)";
+        projBody.appendChild(tr);
+      }
+    }
+
+    renderLineChart("chart_sites_proj", years, [
+      {name:"Acumulado FCF", values: accArr, color:"rgba(59,130,246,.85)"},
+    ], { aria:"Sedes: acumulado de flujo", yTick:(v)=> (v/1e6).toFixed(0)+"M" });
+const setTxt = (id, val, fallback="—")=>{
+      const el = document.getElementById(id);
+      if(!el) return;
+      el.textContent = (val === null || !isFinite(val)) ? fallback : val;
+    };
+
+    setTxt("sitesInv", fmtMXN(investment));
+    setTxt("sitesSalesY", fmtMXN(salesY));
+    setTxt("sitesEbitdaY", fmtMXN(ebitdaY));
+    setTxt("sitesFcfM", fmtMXN(fcfM));
+    setTxt("sitesReqSales", fmtMXN(reqSalesPerSiteM));
+
+    renderBarChart("chart_sites",
+      [
+        {label:"Ventas", value:salesY},
+        {label:"EBITDA", value:ebitdaY},
+        {label:"FCF (aprox)", value:fcfY}
+      ],
+      { aria:"Sedes: ventas, EBITDA y flujo", yTick:(v)=> (v/1e6).toFixed(0)+"M" }
+    );
+  }
+
 
   // ---------- render ----------
   function render(){
@@ -822,12 +1035,16 @@ const SANARE_DASH_VERSION = 'v9'; console.log('Sanare dashboard', SANARE_DASH_VE
     // inversión / payback
     renderInvestmentCalc(rows);
 
+    // calculadora de sedes
+    renderSitesCalc();
+
     // bind buttons
     document.getElementById("btnCSV").onclick = () => exportCSV(rows, salesFactor, mktPct);
     document.getElementById("btnCSV2").onclick = () => exportCSV(rows, salesFactor, mktPct);
   }
 
   function init(){
+    attachMoneyFormatters();
     document.getElementById("today").textContent = new Date().toLocaleDateString("es-MX",{year:"numeric",month:"long",day:"numeric"});
     initTabs();
     mountQuestions();
@@ -836,7 +1053,7 @@ const SANARE_DASH_VERSION = 'v9'; console.log('Sanare dashboard', SANARE_DASH_VE
     document.getElementById("mktPct").addEventListener("input", render);
 
     // inversión / payback
-    const reRenderIds = ["invAmount","fcfConv","discRate","gAfter","extraYears"];
+    const reRenderIds = ["invAmount","fcfConv","discRate","gAfter","extraYears","siteCount","sitesAuto","sitesGrowth","sitesYears","capexPerSite","wcPerSite","salesPerSiteM","gmSite","opexPerSiteM","corpOpexM","daPctSite"];
     reRenderIds.forEach(id => {
       const el = document.getElementById(id);
       if(!el) return;
@@ -844,7 +1061,31 @@ const SANARE_DASH_VERSION = 'v9'; console.log('Sanare dashboard', SANARE_DASH_VE
       el.addEventListener("change", render);
     });
 
+    const autoEl = document.getElementById("sitesAuto");
+    if(autoEl){
+      autoEl.addEventListener("change", ()=>{ window.__SANARE_SITES_LAST_APPLIED = null; render(); });
+    }
+
     document.getElementById("btnPrint").addEventListener("click", ()=> window.print());
+
+    // defaults sedes
+    if (D.sitesDefaults){
+      const setIf = (id, v)=>{
+        const el = document.getElementById(id);
+        if(!el) return;
+        if(el.value === "" || el.value === null || typeof el.value === "undefined") el.value = v;
+        else el.value = v; // for consistencia en demos
+      };
+      setIf("siteCount", D.sitesDefaults.siteCount);
+      setIf("capexPerSite", D.sitesDefaults.capexPerSite);
+      setIf("wcPerSite", D.sitesDefaults.wcPerSite);
+      setIf("salesPerSiteM", D.sitesDefaults.salesPerSiteM);
+      setIf("gmSite", D.sitesDefaults.grossMargin);
+      setIf("opexPerSiteM", D.sitesDefaults.opexPerSiteM);
+      setIf("corpOpexM", D.sitesDefaults.corpOpexM);
+      setIf("daPctSite", D.sitesDefaults.daPct);
+    }
+
     document.getElementById("btnChecklist").addEventListener("click", exportChecklist);
 
     render();

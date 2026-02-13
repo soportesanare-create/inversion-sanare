@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Sanaré 2026–2028 | Dashboard de inversión</title>
-  <link rel="stylesheet" href="assets/style.css?v=9" />
+  <link rel="stylesheet" href="assets/style.css?v=10" />
   <meta name="theme-color" content="#0ea5e9" />
 </head>
 <body>
@@ -12,7 +12,7 @@
     <header class="top">
       <div class="tblock">
         <div class="badge">SANARÉ</div>
-        <h1>Dashboard de inversión (2026–2028) — v9</h1>
+        <h1>Dashboard de inversión (2026–2028) — v12</h1>
         <p class="sub">
           KPIs, sensibilidad y checklist de preguntas. Gráficos en SVG (sin librerías externas, funciona offline).
         </p>
@@ -116,7 +116,7 @@
               <div class="calcGrid">
                 <div class="control">
                   <label for="invAmount">Inversión inicial (MXN)</label>
-                  <input id="invAmount" class="numInput" type="number" min="0" step="500000" value="20000000" />
+                  <input id="invAmount" class="numInput" type="text" min="0" step="500000" value="20000000" / data-money="1">
                   <p class="hint">Se asume inversión en <b>inicio 2026</b> (t=0).</p>
                 </div>
 
@@ -173,6 +173,157 @@
               <p class="hint" style="margin-top:8px">
                 <b>Nota:</b> Esta calculadora usa la <b>utilidad operativa</b> como base y la convierte a <b>flujo libre (FCF)</b> con el % que selecciones.
                 Es una estimación rápida para conversación con inversionistas.
+              </p>
+            </div>
+          </div>
+
+          <div class="chartCard" style="margin-top:12px">
+            <div class="chd">
+              <h2>Calculadora de sedes</h2>
+              <span class="small"># sedes · inversión requerida · ganancia estimada</span>
+            </div>
+            <div class="cbd">
+              <div class="calcGrid">
+                <div class="control">
+                  <label for="siteCount">Número de sedes</label>
+                  <input id="siteCount" class="numInput" type="number" min="1" step="1" value="3" />
+                  <p class="hint">Escala resultados por número de sedes.</p>
+                </div>
+
+
+                <div class="control">
+                  <label>Escenario ideal automático</label>
+                  <div class="switchRow">
+                    <input id="sitesAuto" type="checkbox" checked />
+                    <label for="sitesAuto" class="switchLabel">Auto-llenar supuestos según # de sedes</label>
+                  </div>
+                  <p class="hint">Al cambiar # de sedes, se aplican valores sugeridos (puedes desactivar para editar libremente).</p>
+                </div>
+
+
+                <div class="control">
+                  <label for="capexPerSite">CAPEX inicial por sede (MXN)</label>CAPEX inicial por sede (MXN)</label>
+                  <input id="capexPerSite" class="numInput" type="text" min="0" step="500000" value="6000000" / data-money="1">
+                  <p class="hint">Adecuación + equipo + instalación (aprox).</p>
+                </div>
+
+                <div class="control">
+                  <label for="wcPerSite">Capital de trabajo por sede (MXN)</label>
+                  <input id="wcPerSite" class="numInput" type="text" min="0" step="250000" value="1500000" / data-money="1">
+                  <p class="hint">Inventario inicial + caja operativa (aprox).</p>
+                </div>
+
+                <div class="control">
+                  <label for="salesPerSiteM">Ventas mensuales por sede (MXN)</label>
+                  <input id="salesPerSiteM" class="numInput" type="text" min="0" step="250000" value="2500000" / data-money="1">
+                  <p class="hint">Promedio mensual esperado por sede.</p>
+                </div>
+
+                <div class="control">
+                  <label for="gmSite">Margen bruto por sede</label>
+                  <input id="gmSite" type="range" min="0.25" max="0.55" step="0.01" value="0.38" />
+                  <div class="rangeRow"><span class="small">25%</span><b id="gmSiteVal">38%</b><span class="small">55%</span></div>
+                  <p class="hint">Después de costo de insumos/medicamentos.</p>
+                </div>
+
+                <div class="control">
+                  <label for="opexPerSiteM">OPEX mensual por sede (MXN)</label>
+                  <input id="opexPerSiteM" class="numInput" type="text" min="0" step="100000" value="1200000" / data-money="1">
+                  <p class="hint">Nómina + renta + operación local (aprox).</p>
+                </div>
+
+                <div class="control">
+                  <label for="corpOpexM">OPEX corporativo mensual (MXN)</label>
+                  <input id="corpOpexM" class="numInput" type="text" min="0" step="100000" value="500000" / data-money="1">
+                  <p class="hint">Administración central, tecnología, backoffice.</p>
+                </div>
+
+                <div class="control">
+                  <label for="daPctSite">D&amp;A (% de ventas)</label>
+                  <input id="daPctSite" type="range" min="0.00" max="0.08" step="0.005" value="0.03" />
+                  <div class="rangeRow"><span class="small">0%</span><b id="daPctSiteVal">3.0%</b><span class="small">8%</span></div>
+                  <p class="hint">Depreciación/amortización (para estimar EBIT).</p>
+                </div>
+              </div>
+
+              
+                <div class="control">
+                  <label for="sitesGrowth">Crecimiento anual de ventas por sede</label>
+                  <input id="sitesGrowth" type="range" min="0.00" max="0.30" step="0.01" value="0.10" />
+                  <div class="rangeRow"><span class="small">0%</span><b id="sitesGrowthVal">10%</b><span class="small">30%</span></div>
+                  <p class="hint">Proyección automática de ventas por sede (año contra año).</p>
+                </div>
+
+                <div class="control">
+                  <label for="sitesYears">Años a proyectar (desde 2026)</label>
+                  <input id="sitesYears" class="numInput" type="number" min="3" step="1" value="5" />
+                  <p class="hint">Genera tabla automática por año (ventas, EBITDA, FCF y acumulado).</p>
+                </div>
+
+              <div class="kpiRow" style="margin-top:12px">
+                <div class="kpi">
+                  <div class="lbl">Inversión requerida</div>
+                  <div class="val" id="sitesInv">—</div>
+                  <div class="meta">CAPEX + capital trabajo</div>
+                </div>
+                <div class="kpi">
+                  <div class="lbl">Ventas anuales (total)</div>
+                  <div class="val" id="sitesSalesY">—</div>
+                  <div class="meta">Sedes × ventas mensuales</div>
+                </div>
+                <div class="kpi">
+                  <div class="lbl">EBITDA anual (total)</div>
+                  <div class="val" id="sitesEbitdaY">—</div>
+                  <div class="meta">Utilidad antes de D&amp;A</div>
+                </div>
+              </div>
+
+              <div class="kpiRow" style="margin-top:10px">
+                <div class="kpi">
+                  <div class="lbl">FCF mensual (aprox)</div>
+                  <div class="val" id="sitesFcfM">—</div>
+                  <div class="meta">Usa conversión FCF de arriba</div>
+                </div>
+                <div class="kpi">
+                  <div class="lbl">Payback simple</div>
+                  <div class="val" id="sitesPayback">—</div>
+                  <div class="meta" id="sitesPaybackMeta">—</div>
+                </div>
+                <div class="kpi">
+                  <div class="lbl">Ventas break-even por sede</div>
+                  <div class="val" id="sitesReqSales">—</div>
+                  <div class="meta">Para EBITDA ≈ 0</div>
+                </div>
+              </div>
+
+              <div class="svgHost" id="chart_sites"></div>
+
+              <div class="rowBetween" style="margin-top:12px">
+                <div>
+                  <b style="font-size:13px">Proyección automática de sedes</b>
+                  <div class="small">Se calcula con tus supuestos (ventas/sede, margen, OPEX, crecimiento anual).</div>
+                </div>
+              </div>
+
+              <div class="tableWrap" style="margin-top:8px">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Año</th>
+                      <th class="num">Ventas</th>
+                      <th class="num">EBITDA</th>
+                      <th class="num">FCF (aprox)</th>
+                      <th class="num">Acumulado FCF</th>
+                    </tr>
+                  </thead>
+                  <tbody id="sitesProjBody"></tbody>
+                </table>
+              </div>
+
+              <div class="svgHost" id="chart_sites_proj" style="margin-top:10px"></div>
+
+              <p class="hint" style="margin-top:8px">
+                <b>Nota:</b> Es una calculadora rápida. Ajusta CAPEX/OPEX/margen según tu operación real por sede.
               </p>
             </div>
           </div>
@@ -337,7 +488,7 @@
     </footer>
   </div>
 
-  <script src="assets/data.js?v=9"></script>
-  <script src="assets/app.js?v=9"></script>
+  <script src="assets/data.js?v=12"></script>
+  <script src="assets/app.js?v=12"></script>
 </body>
 </html>
