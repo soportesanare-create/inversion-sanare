@@ -3,9 +3,9 @@ window.SANARE_DATA = {
     // Márgenes más conservadores (más "reales"):
     // - Margen bruto: 36% → 40% (según mix/medicamentos/aseguradoras)
     // - OPEX más alto (talento clínico, coordinación, calidad, cadena de suministro, admón.)
-    { year: 2026, sales: 86.8e6, grossProfit: 31.248e6, grossMargin: 0.36, opex: 32.0e6, opProfit: -0.752e6, opMargin: -0.00866 },
-    { year: 2027, sales: 340.8e6, grossProfit: 129.504e6, grossMargin: 0.38, opex: 105.0e6, opProfit: 24.504e6, opMargin: 0.0719 },
-    { year: 2028, sales: 646.5e6, grossProfit: 258.6e6, grossMargin: 0.40, opex: 185.0e6, opProfit: 73.6e6, opMargin: 0.1138 }
+    { year: 2026, sales: 86.8e6, grossProfit: 31.248e6, grossMargin: 0.36, daPct: 0.04, opex: 32.0e6, opProfit: -0.752e6, opMargin: -0.00866 },
+    { year: 2027, sales: 340.8e6, grossProfit: 129.504e6, grossMargin: 0.38, daPct: 0.03, opex: 105.0e6, opProfit: 24.504e6, opMargin: 0.0719 },
+    { year: 2028, sales: 646.5e6, grossProfit: 258.6e6, grossMargin: 0.40, daPct: 0.025, opex: 185.0e6, opProfit: 73.6e6, opMargin: 0.1138 }
   ],
   opexMix: [
     // Mix OPEX (solo 3 rubros visibles). Ajustado para que no quede dominado por marketing.

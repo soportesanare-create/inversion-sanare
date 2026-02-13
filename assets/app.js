@@ -1,8 +1,11 @@
+const SANARE_DASH_VERSION = 'v9'; console.log('Sanare dashboard', SANARE_DASH_VERSION);
 (() => {
   const D = window.SANARE_DATA;
   const fmtMXN = (n) => new Intl.NumberFormat("es-MX",{style:"currency",currency:"MXN",maximumFractionDigits:0}).format(n);
   const fmtPct = (p) => new Intl.NumberFormat("es-MX",{style:"percent",maximumFractionDigits:1}).format(p);
+  const fmtNum = (n) => new Intl.NumberFormat("es-MX",{maximumFractionDigits:0}).format(n);
   const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+  const MONTHS_ES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 
   // Scenario model (simple): scale sales, keep COGS proportional via base gross margin,
   // marketing = % of sales, keep non-marketing OPEX fixed per year (derived from base OPEX - 10% base marketing)
@@ -19,8 +22,102 @@
       const opProfit = grossProfit - opex;
       const opMargin = opProfit / (sales || 1);
 
-      return { year:y.year, sales, grossProfit, grossMargin:grossProfit/(sales||1), opex, opProfit, opMargin };
+      const da = sales * (("daPct" in y) ? y.daPct : 0.03);
+      const ebitda = opProfit + da;
+      const ebitdaMargin = ebitda / (sales || 1);
+
+      return { year:y.year, sales, grossProfit, grossMargin:grossProfit/(sales||1), opex, opProfit, opMargin, da, ebitda, ebitdaMargin };
     });
+  }
+
+  // ---------- inversión / payback (aprox) ----------
+  function computeExtendedFCF(rows, fcfConv, extraYears, gAfter){
+    const base = rows.map(r => ({ year: r.year, fcf: r.opProfit * fcfConv }));
+    let lastYear = base[base.length - 1].year;
+    let lastFCF  = base[base.length - 1].fcf;
+    for(let i=0;i<extraYears;i++){
+      lastYear += 1;
+      lastFCF = lastFCF * (1 + gAfter);
+      base.push({ year:lastYear, fcf:lastFCF });
+    }
+    return base;
+  }
+
+  function findPaybackMonthly(fcfSeries, investment, discRate, discounted){
+    let cum = -investment;
+    let t = 0; // months from t=0
+    for(const y of fcfSeries){
+      const monthly = y.fcf / 12;
+      for(let m=0;m<12;m++){
+        const df = discounted ? 1 / Math.pow(1 + discRate, t/12) : 1;
+        cum += monthly * df;
+        if(cum >= 0){
+          return { year:y.year, month:m, monthsFromStart:t, cum };
+        }
+        t += 1;
+      }
+    }
+    return null;
+  }
+
+  function npvMonthly(fcfSeries, investment, discRate){
+    let npv = -investment;
+    let t = 0;
+    for(const y of fcfSeries){
+      const monthly = y.fcf / 12;
+      for(let m=0;m<12;m++){
+        const df = 1 / Math.pow(1 + discRate, t/12);
+        npv += monthly * df;
+        t += 1;
+      }
+    }
+    return npv;
+  }
+
+  function irrAnnual(fcfSeries, investment){
+    const cfs = [-investment, ...fcfSeries.map(x=>x.fcf)];
+    const npv = (r) => {
+      let s = cfs[0];
+      for(let i=1;i<cfs.length;i++) s += cfs[i] / Math.pow(1 + r, i);
+      return s;
+    };
+    let lo = -0.9, hi = 5.0;
+    let fLo = npv(lo), fHi = npv(hi);
+    if(!isFinite(fLo) || !isFinite(fHi) || fLo * fHi > 0) return null;
+    for(let i=0;i<90;i++){
+      const mid = (lo + hi) / 2;
+      const fMid = npv(mid);
+      if(Math.abs(fMid) < 1e-6) return mid;
+      if(fLo * fMid <= 0){ hi = mid; fHi = fMid; }
+      else { lo = mid; fLo = fMid; }
+    }
+    return (lo + hi) / 2;
+  }
+
+  function cumByYearSimple(fcfSeries, investment){
+    let cum = -investment;
+    const labels = [`Inicio ${fcfSeries[0].year}`];
+    const values = [cum];
+    for(const y of fcfSeries){
+      cum += y.fcf;
+      labels.push(`Fin ${y.year}`);
+      values.push(cum);
+    }
+    return {labels, values};
+  }
+
+  function cumByYearDiscounted(fcfSeries, investment, discRate){
+    let cum = -investment;
+    const labels = [`Inicio ${fcfSeries[0].year}`];
+    const values = [cum];
+    for(let i=0;i<fcfSeries.length;i++){
+      const y = fcfSeries[i];
+      const df = 1 / Math.pow(1 + discRate, i+1);
+      cum += y.fcf * df;
+      labels.push(`Fin ${y.year}`);
+      values.push(cum);
+    }
+    return {labels, values};
   }
 
   // ---------- SVG helpers (no libraries, offline) ----------
@@ -119,6 +216,97 @@
       svg.appendChild(xtxt);
     });
 
+
+    
+    // ---- interactividad: tooltip al pasar el cursor ----
+    const n = series.length;
+    const overlay = svgEl("rect",{x:x0,y:y0,width:plotW,height:plotH,fill:"transparent"});
+    overlay.style.cursor = "crosshair";
+
+    const vLine = svgEl("line",{x1:x0,y1:y0,x2:x0,y2:y0+plotH,stroke:"#94a3b8","stroke-width":"1","stroke-dasharray":"4 4",opacity:"0"});
+    svg.appendChild(vLine);
+
+    const tipG = svgEl("g",{opacity:"0"});
+    const tipRect = svgEl("rect",{x:0,y:0,width:10,height:10,rx:10,ry:10,fill:"rgba(15,23,42,.92)"});
+    const tipText1 = svgEl("text",{x:0,y:0,fill:"#ffffff","font-size":"11","font-weight":"700"});
+    const tipText2 = svgEl("text",{x:0,y:0,fill:"#e2e8f0","font-size":"10"});
+    tipG.appendChild(tipRect);
+    tipG.appendChild(tipText1);
+    tipG.appendChild(tipText2);
+    svg.appendChild(tipG);
+
+    function setTipBox(lines){
+      const maxLen = Math.max(...lines.map(s=>String(s).length));
+      const w = Math.max(150, maxLen*7 + 22);
+      const h = 52;
+      tipRect.setAttribute("width", w);
+      tipRect.setAttribute("height", h);
+      return {w,h};
+    }
+
+    function showAt(idx){
+      idx = clamp(idx,0,n-1);
+      const s = series[idx];
+
+      const cx = x0 + idx*(barW+barGap) + barW/2;
+      vLine.setAttribute("x1", cx);
+      vLine.setAttribute("x2", cx);
+      vLine.setAttribute("opacity", "1");
+
+      const l1 = s.label;
+      const valTxt = (opts.valueLabel ? opts.valueLabel(s.value) : String(Math.round(s.value)));
+      const l2 = `Valor: ${valTxt}`;
+
+      const dims = setTipBox([l1,l2]);
+
+      const yv = yScale(s.value);
+      let tx = cx + 12;
+      let ty = yv - dims.h/2;
+
+      if(tx + dims.w > W - 8) tx = cx - dims.w - 12;
+      ty = clamp(ty, 8, H - dims.h - 8);
+
+      tipRect.setAttribute("x", tx);
+      tipRect.setAttribute("y", ty);
+
+      tipText1.textContent = l1;
+      tipText2.textContent = l2;
+
+      tipText1.setAttribute("x", tx + 11);
+      tipText1.setAttribute("y", ty + 22);
+      tipText2.setAttribute("x", tx + 11);
+      tipText2.setAttribute("y", ty + 40);
+
+      tipG.setAttribute("opacity","1");
+    }
+
+    function hideTip(){
+      tipG.setAttribute("opacity","0");
+      vLine.setAttribute("opacity","0");
+    }
+
+    overlay.addEventListener("mousemove", (e)=>{
+      const pt = svg.createSVGPoint();
+      pt.x = e.clientX; pt.y = e.clientY;
+      const loc = pt.matrixTransform(svg.getScreenCTM().inverse());
+      const idx = Math.floor((loc.x - x0) / (barW + barGap));
+      showAt(idx);
+    });
+    overlay.addEventListener("mouseleave", hideTip);
+
+    overlay.addEventListener("touchstart", (e)=>{
+      const t = e.touches[0];
+      const pt = svg.createSVGPoint();
+      pt.x = t.clientX; pt.y = t.clientY;
+      const loc = pt.matrixTransform(svg.getScreenCTM().inverse());
+      const idx = Math.floor((loc.x - x0) / (barW + barGap));
+      showAt(idx);
+    }, {passive:true});
+    overlay.addEventListener("touchend", hideTip);
+
+    svg.appendChild(overlay);
+
+
     host.appendChild(svg);
   }
 
@@ -193,6 +381,108 @@
       });
     });
 
+
+    // ---- interactividad: tooltip al pasar el cursor ----
+    const n = xLabels.length;
+    const overlay = svgEl("rect",{x:x0,y:y0,width:plotW,height:plotH,fill:"transparent"});
+    overlay.style.cursor = "crosshair";
+
+    const vLine = svgEl("line",{x1:x0,y1:y0,x2:x0,y2:y0+plotH,stroke:"#94a3b8","stroke-width":"1","stroke-dasharray":"4 4",opacity:"0"});
+    svg.appendChild(vLine);
+
+    const tipG = svgEl("g",{opacity:"0"});
+    const tipRect = svgEl("rect",{x:0,y:0,width:10,height:10,rx:10,ry:10,fill:"rgba(15,23,42,.92)"});
+    const tipText1 = svgEl("text",{x:0,y:0,fill:"#ffffff","font-size":"11","font-weight":"700"});
+    const tipText2 = svgEl("text",{x:0,y:0,fill:"#e2e8f0","font-size":"10"});
+    const tipText3 = svgEl("text",{x:0,y:0,fill:"#e2e8f0","font-size":"10"});
+    tipG.appendChild(tipRect);
+    tipG.appendChild(tipText1);
+    tipG.appendChild(tipText2);
+    tipG.appendChild(tipText3);
+    svg.appendChild(tipG);
+
+    // helper to set tooltip size
+    function setTipBox(lines){
+      // rough measure: 7px per char; safe padding
+      const maxLen = Math.max(...lines.map(s=>String(s).length));
+      const w = Math.max(160, maxLen*7 + 24);
+      const h = 68;
+      tipRect.setAttribute("width", w);
+      tipRect.setAttribute("height", h);
+      return {w,h};
+    }
+
+    function showAt(idx){
+      idx = clamp(idx,0,n-1);
+      const x = xScale(idx);
+      vLine.setAttribute("x1", x);
+      vLine.setAttribute("x2", x);
+      vLine.setAttribute("opacity", "1");
+
+      const title = xLabels[idx];
+      const l1 = `${title}`;
+      // valores por línea
+      const a = lines[0] ? lines[0].values[idx] : 0;
+      const b = lines[1] ? lines[1].values[idx] : null;
+      const l2 = lines[0] ? `${lines[0].name}: ${fmtMXN(a)}` : "";
+      const l3 = (b!==null && lines[1]) ? `${lines[1].name}: ${fmtMXN(b)}` : "";
+
+      const dims = setTipBox([l1,l2,l3]);
+
+      // posicionar cerca del punto superior
+      const yA = yScale(a);
+      const yB = (b!==null) ? yScale(b) : yA;
+      const y = Math.min(yA, yB);
+      let tx = x + 12;
+      let ty = y - dims.h/2;
+      // clamp dentro del svg
+      if(tx + dims.w > W - 8) tx = x - dims.w - 12;
+      ty = clamp(ty, 8, H - dims.h - 8);
+
+      tipRect.setAttribute("x", tx);
+      tipRect.setAttribute("y", ty);
+
+      tipText1.textContent = l1;
+      tipText2.textContent = l2;
+      tipText3.textContent = l3;
+
+      tipText1.setAttribute("x", tx + 12);
+      tipText1.setAttribute("y", ty + 22);
+      tipText2.setAttribute("x", tx + 12);
+      tipText2.setAttribute("y", ty + 42);
+      tipText3.setAttribute("x", tx + 12);
+      tipText3.setAttribute("y", ty + 58);
+
+      tipG.setAttribute("opacity","1");
+    }
+
+    function hideTip(){
+      tipG.setAttribute("opacity","0");
+      vLine.setAttribute("opacity","0");
+    }
+
+    overlay.addEventListener("mousemove", (e)=>{
+      const pt = svg.createSVGPoint();
+      pt.x = e.clientX; pt.y = e.clientY;
+      const loc = pt.matrixTransform(svg.getScreenCTM().inverse());
+      const rel = (loc.x - x0) / (plotW || 1);
+      const idx = Math.round(rel * (n-1));
+      showAt(idx);
+    });
+    overlay.addEventListener("mouseleave", hideTip);
+    overlay.addEventListener("touchstart", (e)=>{
+      const t = e.touches[0];
+      const pt = svg.createSVGPoint();
+      pt.x = t.clientX; pt.y = t.clientY;
+      const loc = pt.matrixTransform(svg.getScreenCTM().inverse());
+      const rel = (loc.x - x0) / (plotW || 1);
+      const idx = Math.round(rel * (n-1));
+      showAt(idx);
+    }, {passive:true});
+    overlay.addEventListener("touchend", hideTip);
+
+    svg.appendChild(overlay);
+
     host.appendChild(svg);
   }
 
@@ -247,6 +537,70 @@
       svg.appendChild(txt);
     });
 
+
+    // ---- interactividad: tooltip al pasar el cursor ----
+    const overlay = svgEl("rect",{x:x0,y:y0,width:plotW,height:plotH,fill:"transparent"});
+    overlay.style.cursor = "crosshair";
+
+    const tipG = svgEl("g",{opacity:"0"});
+    const tipRect = svgEl("rect",{x:0,y:0,width:220,height:44,fill:"#0f172a",rx:10,ry:10,opacity:"0.92"});
+    const tipText1 = svgEl("text",{x:10,y:18,fill:"#ffffff","font-size":"11","font-weight":"700"});
+    const tipText2 = svgEl("text",{x:10,y:34,fill:"#e2e8f0","font-size":"11"});
+    tipG.appendChild(tipRect);
+    tipG.appendChild(tipText1);
+    tipG.appendChild(tipText2);
+    svg.appendChild(tipG);
+
+    function hideTip(){
+      tipG.setAttribute("opacity","0");
+    }
+
+    function showTip(loc){
+      const x = loc.x, y = loc.y;
+      if (x < x0 || x > x0 + plotW || y < y0 || y > y0 + plotH){ hideTip(); return; }
+
+      const rowIdx = clamp(Math.floor((y - y0) / (yStep || 1)), 0, rows.length - 1);
+      const r = rows[rowIdx];
+
+      const rel = clamp((x - x0) / (plotW || 1), 0, 1);
+
+      // determinar segmento
+      let acc = 0, segIdx = 0, segVal = 0;
+      for (let j=0; j<r.parts.length; j++){
+        const p = clamp(r.parts[j],0,1);
+        acc += p;
+        if (rel <= acc + 1e-9){
+          segIdx = j;
+          segVal = p;
+          break;
+        }
+      }
+
+      tipText1.textContent = r.label;
+      tipText2.textContent = `${partNames[segIdx]}: ${Math.round(segVal*100)}%`;
+
+      // posicionar tooltip (evitar salir del canvas)
+      const tx = clamp(x + 12, 8, W - 228);
+      const ty = clamp(y - 50, 8, H - 54);
+      tipG.setAttribute("transform", `translate(${tx},${ty})`);
+      tipG.setAttribute("opacity","1");
+    }
+
+    function svgPointFromEvent(e){
+      const pt = svg.createSVGPoint();
+      pt.x = (e.touches ? e.touches[0].clientX : e.clientX);
+      pt.y = (e.touches ? e.touches[0].clientY : e.clientY);
+      return pt.matrixTransform(svg.getScreenCTM().inverse());
+    }
+
+    overlay.addEventListener("mousemove", (e)=> showTip(svgPointFromEvent(e)));
+    overlay.addEventListener("mouseleave", hideTip);
+    overlay.addEventListener("touchstart", (e)=> showTip(svgPointFromEvent(e)), {passive:true});
+    overlay.addEventListener("touchmove", (e)=> showTip(svgPointFromEvent(e)), {passive:true});
+    overlay.addEventListener("touchend", hideTip);
+
+    svg.appendChild(overlay);
+
     host.appendChild(svg);
   }
 
@@ -294,7 +648,7 @@
   }
 
   function exportCSV(rows, salesFactor, mktPct){
-    const header = ["Año","Ventas","UtilidadBruta","MargenBruto","GastoOperativo","UtilidadOperativa","MargenOperativo"];
+    const header = ["Año","Ventas","UtilidadBruta","MargenBruto","GastoOperativo","UtilidadOperativa","EBITDA","MargenEBITDA","MargenOperativo"];
     const lines = [
       header.join(","),
       ...rows.map(r=>[
@@ -304,6 +658,8 @@
         (r.grossMargin*100).toFixed(2)+"%",
         r.opex.toFixed(0),
         r.opProfit.toFixed(0),
+        r.ebitda.toFixed(0),
+        (r.ebitdaMargin*100).toFixed(2)+"%",
         (r.opMargin*100).toFixed(2)+"%"
       ].join(","))
     ];
@@ -324,6 +680,66 @@
     });
     downloadBlob("checklist_inversion_sanare.txt",
       new Blob([lines.join("\\n")], {type:"text/plain;charset=utf-8"})
+    );
+  }
+
+  // ---------- inversión UI ----------
+  function renderInvestmentCalc(rows){
+    const invEl = document.getElementById("invAmount");
+    const fcfEl = document.getElementById("fcfConv");
+    const discEl = document.getElementById("discRate");
+    const gEl = document.getElementById("gAfter");
+    const extraEl = document.getElementById("extraYears");
+    if(!invEl || !fcfEl || !discEl || !gEl || !extraEl) return; // si no existe en el DOM
+
+    const investment = Math.max(0, parseFloat(invEl.value || "0"));
+    const fcfConv = parseFloat(fcfEl.value);
+    const discRate = parseFloat(discEl.value);
+    const gAfter = parseFloat(gEl.value);
+    const extraYears = parseInt(extraEl.value, 10);
+
+    document.getElementById("fcfConvVal").textContent = Math.round(fcfConv*100) + "%";
+    document.getElementById("discRateVal").textContent = Math.round(discRate*100) + "%";
+    document.getElementById("gAfterVal").textContent = Math.round(gAfter*100) + "%";
+    document.getElementById("extraYearsVal").textContent = String(extraYears);
+
+    const fcfSeries = computeExtendedFCF(rows, fcfConv, extraYears, gAfter);
+
+    const pbSimple = findPaybackMonthly(fcfSeries, investment, discRate, false);
+    const pbDisc = findPaybackMonthly(fcfSeries, investment, discRate, true);
+
+    const pbSimpleTxt = pbSimple ? `${MONTHS_ES[pbSimple.month]} ${pbSimple.year}` : "No recupera en el horizonte";
+    const pbDiscTxt = pbDisc ? `${MONTHS_ES[pbDisc.month]} ${pbDisc.year}` : "No recupera en el horizonte";
+    document.getElementById("pbSimple").textContent = pbSimpleTxt;
+    document.getElementById("pbDisc").textContent = pbDiscTxt;
+
+    // mostrar meses/años desde inicio 2026 (t=0)
+    const pbToMonths = (pb)=> pb ? ((pb.year-2026)*12 + pb.month + 1) : null;
+    const ms = pbToMonths(pbSimple);
+    const md = pbToMonths(pbDisc);
+    const fmtYears = (m)=> (m/12).toFixed(1);
+    const elPS = document.getElementById("pbSimpleYears");
+    const elPD = document.getElementById("pbDiscYears");
+    if(elPS) elPS.textContent = ms ? `${ms} meses (${fmtYears(ms)} años)` : "";
+    if(elPD) elPD.textContent = md ? `${md} meses (${fmtYears(md)} años)` : "";
+
+
+    const npv = npvMonthly(fcfSeries, investment, discRate);
+    const irr = irrAnnual(fcfSeries.slice(0, Math.min(fcfSeries.length, 12)), investment); // limitar para estabilidad
+    const irrTxt = (irr === null) ? "—" : (new Intl.NumberFormat("es-MX",{style:"percent",maximumFractionDigits:1}).format(irr));
+    document.getElementById("npvIrr").innerHTML = `${fmtMXN(npv)} <span class="small">NPV</span> · ${irrTxt} <span class="small">IRR</span>`;
+
+    const cumS = cumByYearSimple(fcfSeries, investment);
+    const cumD = cumByYearDiscounted(fcfSeries, investment, discRate);
+
+    renderLineChart(
+      "chart_payback",
+      cumS.labels,
+      [
+        { name:"Acumulado (simple)", values:cumS.values, color:"rgba(14,165,233,.85)" },
+        { name:"Acumulado (descontado)", values:cumD.values, color:"rgba(245,158,11,.80)" }
+      ],
+      { aria:"Flujo acumulado", yTick:(v)=> (v/1e6).toFixed(0)+"M" }
     );
   }
 
@@ -357,6 +773,8 @@
         <td class="num">${fmtPct(r.grossMargin)}</td>
         <td class="num">${fmtMXN(r.opex)}</td>
         <td class="num"><b>${fmtMXN(r.opProfit)}</b></td>
+        <td class="num">${fmtMXN(r.ebitda)}</td>
+        <td class="num">${fmtPct(r.ebitdaMargin)}</td>
         <td class="num"><b>${fmtPct(r.opMargin)}</b></td>
       </tr>
     `).join("");
@@ -370,11 +788,18 @@
       rows.map(r=>({label:String(r.year), value:r.opProfit})),
       { aria:"Utilidad operativa por año", yTick:(v)=> (v/1e6).toFixed(0)+"M", valueLabel:(v)=> (v/1e6).toFixed(0)+"M" }
     );
+    
+
+    renderBarChart("chart_ebitda",
+      rows.map(r=>({label:String(r.year), value:r.ebitda})),
+      { aria:"EBITDA por año", yTick:(v)=> (v/1e6).toFixed(0)+"M", valueLabel:(v)=> (v/1e6).toFixed(0)+"M" }
+    );
 
     renderLineChart("chart_margins",
       rows.map(r=>String(r.year)),
       [
         { name:"Margen bruto", values: rows.map(r=>r.grossMargin*100), color:"rgba(14,165,233,.85)" },
+        { name:"Margen EBITDA", values: rows.map(r=>r.ebitdaMargin*100), color:"rgba(34,197,94,.80)" },
         { name:"Margen operativo", values: rows.map(r=>r.opMargin*100), color:"rgba(245,158,11,.80)" }
       ],
       { aria:"Márgenes (%)", yTick:(v)=> v.toFixed(0)+"%" }
@@ -394,6 +819,9 @@
       }
     );
 
+    // inversión / payback
+    renderInvestmentCalc(rows);
+
     // bind buttons
     document.getElementById("btnCSV").onclick = () => exportCSV(rows, salesFactor, mktPct);
     document.getElementById("btnCSV2").onclick = () => exportCSV(rows, salesFactor, mktPct);
@@ -406,6 +834,15 @@
 
     document.getElementById("salesFactor").addEventListener("input", render);
     document.getElementById("mktPct").addEventListener("input", render);
+
+    // inversión / payback
+    const reRenderIds = ["invAmount","fcfConv","discRate","gAfter","extraYears"];
+    reRenderIds.forEach(id => {
+      const el = document.getElementById(id);
+      if(!el) return;
+      el.addEventListener("input", render);
+      el.addEventListener("change", render);
+    });
 
     document.getElementById("btnPrint").addEventListener("click", ()=> window.print());
     document.getElementById("btnChecklist").addEventListener("click", exportChecklist);

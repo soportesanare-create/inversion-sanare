@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Sanaré 2026–2028 | Dashboard de inversión</title>
-  <link rel="stylesheet" href="assets/style.css" />
+  <link rel="stylesheet" href="assets/style.css?v=9" />
   <meta name="theme-color" content="#0ea5e9" />
 </head>
 <body>
@@ -12,7 +12,7 @@
     <header class="top">
       <div class="tblock">
         <div class="badge">SANARÉ</div>
-        <h1>Dashboard de inversión (2026–2028)</h1>
+        <h1>Dashboard de inversión (2026–2028) — v9</h1>
         <p class="sub">
           KPIs, sensibilidad y checklist de preguntas. Gráficos en SVG (sin librerías externas, funciona offline).
         </p>
@@ -96,6 +96,85 @@
               </div>
               <div class="cbd"><div class="svgHost" id="chart_op"></div></div>
             </div>
+
+            <div class="chartCard">
+              <div class="chd">
+                <h2>EBITDA</h2>
+                <span class="small">Barras</span>
+              </div>
+              <div class="cbd"><div class="svgHost" id="chart_ebitda"></div></div>
+            </div>
+          </div>
+
+          <!-- CALCULADORA DE INVERSIÓN / PAYBACK -->
+          <div class="chartCard" style="margin-top:12px">
+            <div class="chd">
+              <h2>Calculadora de recuperación de inversión</h2>
+              <span class="small">Payback + NPV/IRR (aprox)</span>
+            </div>
+            <div class="cbd">
+              <div class="calcGrid">
+                <div class="control">
+                  <label for="invAmount">Inversión inicial (MXN)</label>
+                  <input id="invAmount" class="numInput" type="number" min="0" step="500000" value="20000000" />
+                  <p class="hint">Se asume inversión en <b>inicio 2026</b> (t=0).</p>
+                </div>
+
+                <div class="control">
+                  <label for="fcfConv">Conversión a flujo (FCF) desde utilidad operativa</label>
+                  <input id="fcfConv" type="range" min="0.40" max="0.90" step="0.05" value="0.70" />
+                  <div class="rval"><span>40%</span><b id="fcfConvVal">70%</b><span>90%</span></div>
+                  <p class="hint">Ajusta por impuestos, capex y capital de trabajo (aprox).</p>
+                </div>
+
+                <div class="control">
+                  <label for="discRate">Tasa de descuento anual</label>
+                  <input id="discRate" type="range" min="0.06" max="0.30" step="0.01" value="0.12" />
+                  <div class="rval"><span>6%</span><b id="discRateVal">12%</b><span>30%</span></div>
+                  <p class="hint">Para payback descontado y NPV.</p>
+                </div>
+
+                <div class="control">
+                  <label for="gAfter">Crecimiento anual del flujo después de 2028</label>
+                  <input id="gAfter" type="range" min="0.00" max="0.30" step="0.01" value="0.10" />
+                  <div class="rval"><span>0%</span><b id="gAfterVal">10%</b><span>30%</span></div>
+                  <p class="hint">Extiende el horizonte si el payback no ocurre en 2026–2028.</p>
+                </div>
+
+                <div class="control">
+                  <label for="extraYears">Años extra a simular (2029+)</label>
+                  <input id="extraYears" type="range" min="0" max="10" step="1" value="5" />
+                  <div class="rval"><span>0</span><b id="extraYearsVal">5</b><span>10</span></div>
+                  <p class="hint">Hasta 10 años adicionales para encontrar recuperación.</p>
+                </div>
+              </div>
+
+              <div class="kpiRow calcKpis">
+                <div class="kpi">
+                  <div class="lbl">Payback simple</div>
+                  <div class="val" id="pbSimple">—</div>
+                  <div class="meta">Con FCF mensual</div>
+                  <div class="meta2" id="pbSimpleYears">—</div>
+                </div>
+                <div class="kpi">
+                  <div class="lbl">Payback descontado</div>
+                  <div class="val" id="pbDisc">—</div>
+                  <div class="meta">A tasa seleccionada</div>
+                  <div class="meta2" id="pbDiscYears">—</div>
+                </div>
+                <div class="kpi">
+                  <div class="lbl">NPV / IRR</div>
+                  <div class="val" id="npvIrr">—</div>
+                  <div class="meta">NPV (MXN) e IRR aprox</div>
+                </div>
+              </div>
+
+              <div class="svgHost" id="chart_payback"></div>
+              <p class="hint" style="margin-top:8px">
+                <b>Nota:</b> Esta calculadora usa la <b>utilidad operativa</b> como base y la convierte a <b>flujo libre (FCF)</b> con el % que selecciones.
+                Es una estimación rápida para conversación con inversionistas.
+              </p>
+            </div>
           </div>
 
           <div class="note" id="noteBE">
@@ -124,6 +203,8 @@
                   <th class="num">Margen bruto</th>
                   <th class="num">Gasto operativo</th>
                   <th class="num">Utilidad operativa</th>
+                  <th class="num">EBITDA</th>
+                  <th class="num">Margen EBITDA</th>
                   <th class="num">Margen operativo</th>
                 </tr>
               </thead>
@@ -245,7 +326,7 @@
 
           <div class="mini2">
             <b>Fecha:</b> <span id="today"></span><br/>
-            <b>Versión:</b> v1 (offline)
+            <b>Versión:</b> v2 (offline)
           </div>
         </div>
       </aside>
@@ -256,7 +337,7 @@
     </footer>
   </div>
 
-  <script src="assets/data.js"></script>
-  <script src="assets/app.js"></script>
+  <script src="assets/data.js?v=9"></script>
+  <script src="assets/app.js?v=9"></script>
 </body>
 </html>
